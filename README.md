@@ -1,8 +1,8 @@
-# x11-input-control
+# x11-computer-use
 
 一个遵循 [Agent Skills 规范](https://agentskills.io) 的 X11 桌面控制 skill：用 `xdotool` 注入鼠标/键盘事件，用 ImageMagick `import` 截屏。适用于 Claude Code、Codex、Cursor、OpenCode 等支持 `SKILL.md` 的 agent。
 
-> **平台要求：仅适用于 X11 会话。** 不支持 Wayland 原生窗口；在 Wayland 会话中只能操作 XWayland 应用（X11 程序）。
+> **平台要求：仅适用于 X11 会话。** 不支持 Wayland 原生窗口；在 Wayland 会话中只能操作/截取 XWayland 应用，原生 Wayland 窗口既看不到也点不到。
 >
 > **注意：鼠标操作会占用用户的真实鼠标/光标。** `move`、`click`、`dclick`、`rclick`、`drag` 会把系统指针移动到目标坐标，操作期间用户无法正常使用鼠标；本 skill 没有独立的“后台光标”。键盘输入同样会进入当前焦点窗口。
 
@@ -21,29 +21,45 @@
 
 - Linux **X11** 会话（Wayland 下仅能操作 XWayland 窗口）
 - [`xdotool`](https://github.com/jordansissel/xdotool)
-- ImageMagick：`import`、`identify`（缩放与 `--mark` 需要 `convert`）
+- ImageMagick 6 或 7：`import`、`identify`（缩放与 `--mark` 需要 `convert`；IM7 用 `magick`，脚本自动识别）
 - `xclip` 或 `xsel`（可选，中文等非 ASCII 输入用；没有时退回 `xdotool type`）
 
-```bash
-# Debian / Deepin / Ubuntu
-sudo apt install xdotool imagemagick xclip
-```
+## 发行版兼容性
+
+脚本只依赖 X11 标准协议、`xdotool`、ImageMagick 和 coreutils，**有这些工具的 X11 发行版通常都能用**；但不同发行版存在差异，不能保证零调整（没有做跨发行版 CI）：
+
+| 发行版 | 安装命令 | 状态 |
+| :--- | :--- | :--- |
+| Debian / Ubuntu / Deepin | `sudo apt install xdotool imagemagick xclip` | 已在 Deepin 25 X11 实测 |
+| Fedora | `sudo dnf install xdotool ImageMagick xclip` | 未实测，包名一致 |
+| Arch / Manjaro | `sudo pacman -S xdotool imagemagick xclip` | 未实测，ImageMagick 7 走 `magick` |
+| openSUSE | `sudo zypper install xdotool ImageMagick xclip` | 未实测 |
+
+已知差异与处理：
+
+- **ImageMagick 6/7**：自动检测 `import`/`identify`，没有时改用 `magick` 子命令。
+- **窗口管理器**：`win activate` 优先 EWMH，失败时回退 `windowfocus + windowraise`；极简 WM 仍可能拒绝聚焦。
+- **Wayland**：只能操作/截取 XWayland 窗口，原生 Wayland 内容不可见。
+- **多屏 / 负坐标**：X11 root 坐标支持负值，`--crop`、`coord` 都接受负偏移，但未覆盖所有布局。
+- **包拆分**：个别发行版的 ImageMagick 拆包，缺 `import` 时用 `magick` 或补装对应子包。
+
+使用前先跑一次 `./scripts/xctrl.sh check`，它会报告 `session / xdotool / imagemagick / screen`。
 
 ## 安装
 
-**方式一：skills CLI（发布到 GitHub 后）**
+**方式一：skills CLI**
 
 ```bash
-npx skills add <owner>/x11-input-control --skill x11-input-control -g
+npx skills add ja-plus/x11-computer-use --skill x11-computer-use -g
 ```
 
 **方式二：手动 clone（通用）**
 
 ```bash
-git clone <repo-url> ~/.claude/skills/x11-input-control
+git clone https://github.com/ja-plus/x11-computer-use ~/.claude/skills/x11-computer-use
 ```
 
-其他 agent 同理：把仓库放进该 agent 的 skills 目录即可，**目录名必须是 `x11-input-control`**（与 `SKILL.md` 的 `name` 一致）。项目级安装可放到 `.claude/skills/x11-input-control`。
+其他 agent 同理：把仓库放进该 agent 的 skills 目录即可，**目录名必须是 `x11-computer-use`**（与 `SKILL.md` 的 `name` 一致）。项目级安装可放到 `.claude/skills/x11-computer-use`。
 
 ## 快速开始
 
@@ -83,7 +99,7 @@ $ ./scripts/xctrl.sh coord 800 450 2.0
 ## 目录结构
 
 ```
-x11-input-control/
+x11-computer-use/
 ├── SKILL.md                  # skill 入口（frontmatter + 指令）
 ├── scripts/
 │   ├── xctrl.sh              # 核心脚本

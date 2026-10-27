@@ -36,9 +36,29 @@ need_tool() {
     command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' not found in PATH" >&2; exit 2; }
 }
 
+# ImageMagick 6 ships import/identify/convert; ImageMagick 7 ships `magick`.
+IM_MODE=""
+if command -v import >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; then
+    IM_MODE="im6"
+elif command -v magick >/dev/null 2>&1; then
+    IM_MODE="im7"
+fi
+
+im_import() {
+    if [ "$IM_MODE" = "im6" ]; then import "$@"; else magick import "$@"; fi
+}
+
+im_identify() {
+    if [ "$IM_MODE" = "im6" ]; then identify "$@"; else magick identify "$@"; fi
+}
+
+im_convert() {
+    if [ "$IM_MODE" = "im6" ]; then convert "$@"; else magick "$@"; fi
+}
+
 warn_wayland() {
-    if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-        echo "WARN: Wayland session; xdotool only affects XWayland (X11) windows." >&2
+    if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        echo "WARN: Wayland session; xdotool/import only cover XWayland (X11) windows; native Wayland content may be missing." >&2
     fi
 }
 
@@ -64,7 +84,7 @@ resolve_win_id() {
 
 img_size() {
     # $1: image path -> "WxH" (empty when unreadable)
-    identify -format '%wx%h' "$1" 2>/dev/null
+    im_identify -format '%wx%h' "$1" 2>/dev/null
 }
 
 is_uint() {
@@ -163,17 +183,21 @@ warn_wayland
 
 case "$cmd" in
     check)
-        echo "session: ${XDG_SESSION_TYPE:-unknown}  display: ${DISPLAY:-unset}"
+        echo "session: ${XDG_SESSION_TYPE:-unknown}  desktop: ${XDG_CURRENT_DESKTOP:-unknown}  display: ${DISPLAY:-unset}"
         missing=0
-        for t in xdotool import identify; do
-            if command -v "$t" >/dev/null 2>&1; then
-                echo "tool ok : $t ($(command -v "$t"))"
-            else
-                echo "tool MISSING: $t"
-                missing=1
-            fi
-        done
-        for t in convert xclip; do
+        if command -v xdotool >/dev/null 2>&1; then
+            echo "tool ok : xdotool ($(command -v xdotool))"
+        else
+            echo "tool MISSING: xdotool"
+            missing=1
+        fi
+        if [ -n "$IM_MODE" ]; then
+            echo "imagemagick: $IM_MODE"
+        else
+            echo "tool MISSING: ImageMagick (import/identify, or magick)"
+            missing=1
+        fi
+        for t in xclip xsel; do
             if command -v "$t" >/dev/null 2>&1; then
                 echo "tool opt: $t ($(command -v "$t"))"
             fi
@@ -291,7 +315,11 @@ case "$cmd" in
                 [ $# -ge 1 ] || die "usage: win activate <id|name>"
                 id=$(resolve_win_id "$1")
                 [ -n "$id" ] || { echo "ERROR: no window matched '$1'" >&2; exit 4; }
-                xdotool windowactivate --sync "$id" || die "activate failed for window $id"
+                if ! xdotool windowactivate --sync "$id" 2>/dev/null; then
+                    # Some WMs lack EWMH _NET_ACTIVE_WINDOW; fall back to focus+raise.
+                    xdotool windowfocus "$id" 2>/dev/null && xdotool windowraise "$id" 2>/dev/null \
+                        || die "activate failed for window $id"
+                fi
                 echo "activated $id ($(xdotool getwindowname "$id" 2>/dev/null))"
                 ;;
             geom)
@@ -333,14 +361,14 @@ case "$cmd" in
 
         [ "$delay" -gt 0 ] && sleep "$delay"
         mkdir -p "$(dirname "$out")"
-        need_tool import
+        [ -n "$IM_MODE" ] || die "ImageMagick not found (need import/identify or magick)"
         is_jpeg=0
         case "$out" in *.jpg|*.jpeg|*.JPG|*.JPEG) is_jpeg=1 ;; esac
         capture() {
             if [ "$is_jpeg" -eq 1 ]; then
-                import "$@" -quality "$quality" "$out"
+                im_import "$@" -quality "$quality" "$out"
             else
-                import "$@" "$out"
+                im_import "$@" "$out"
             fi
         }
 
@@ -357,18 +385,16 @@ case "$cmd" in
         fi
         [ -s "$out" ] || die "capture produced no data: $out"
 
-        need_tool identify
         orig=$(img_size "$out")
         [ -n "$orig" ] || die "cannot read image size: $out"
 
         if [ "$maxw" -gt 0 ] && [ "${orig%x*}" -gt "$maxw" ]; then
-            need_tool convert
             tmp="${out}.tmp.$$"
             case "$out" in
                 *.jpg|*.jpeg|*.JPG|*.JPEG)
-                    convert "$out" -resize "${maxw}x>" -quality "$quality" "$tmp" || { rm -f "$tmp"; die "downscale failed"; } ;;
+                    im_convert "$out" -resize "${maxw}x>" -quality "$quality" "$tmp" || { rm -f "$tmp"; die "downscale failed"; } ;;
                 *)
-                    convert "$out" -resize "${maxw}x>" "$tmp" || { rm -f "$tmp"; die "downscale failed"; } ;;
+                    im_convert "$out" -resize "${maxw}x>" "$tmp" || { rm -f "$tmp"; die "downscale failed"; } ;;
             esac
             mv -f "$tmp" "$out" || die "cannot replace $out"
         fi
@@ -417,7 +443,7 @@ case "$cmd" in
         fi
 
         if [ -n "$mark" ]; then
-            need_tool convert
+            [ -n "$IM_MODE" ] || die "ImageMagick not found (need import/identify or magick)"
             mx=${mark%,*}; my=${mark#*,}
             ix=$(awk -v x="$mx" -v o="$off_x" -v s="$scale" 'BEGIN { printf "%.0f", (x-o)/s }')
             iy=$(awk -v y="$my" -v o="$off_y" -v s="$scale" 'BEGIN { printf "%.0f", (y-o)/s }')
@@ -426,11 +452,11 @@ case "$cmd" in
             fi
             mtmp="${out}.mark.$$"
             if [ "$is_jpeg" -eq 1 ]; then
-                convert "$out" -stroke '#ff2222' -strokewidth 2 -fill none \
+                im_convert "$out" -stroke '#ff2222' -strokewidth 2 -fill none \
                     -draw "line $((ix-24)),$iy $((ix+24)),$iy line $ix,$((iy-24)) $ix,$((iy+24)) circle $ix,$iy $((ix+10)),$iy" \
                     -quality "$quality" "$mtmp" || { rm -f "$mtmp"; die "cannot draw mark"; }
             else
-                convert "$out" -stroke '#ff2222' -strokewidth 2 -fill none \
+                im_convert "$out" -stroke '#ff2222' -strokewidth 2 -fill none \
                     -draw "line $((ix-24)),$iy $((ix+24)),$iy line $ix,$((iy-24)) $ix,$((iy+24)) circle $ix,$iy $((ix+10)),$iy" \
                     "$mtmp" || { rm -f "$mtmp"; die "cannot draw mark"; }
             fi

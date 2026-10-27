@@ -30,6 +30,10 @@ if out=$("$S" check 2>&1); then
         *"tool ok : xdotool"*) ok "xdotool detected" ;;
         *) bad "xdotool detected" ;;
     esac
+    case "$out" in
+        *"imagemagick: im6"*|*"imagemagick: im7"*) ok "ImageMagick detected" ;;
+        *) bad "ImageMagick detected" ;;
+    esac
 else
     bad "check exits 0 (no X11 display or missing tools)"
     printf '%s\n' "$out" | sed 's/^/     /'

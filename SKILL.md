@@ -1,14 +1,14 @@
 ---
-name: x11-input-control
+name: x11-computer-use
 description: "X11 桌面鼠标键盘注入与截屏控制。通过 xdotool 控制指针移动/点击/拖拽/键盘输入，通过 ImageMagick import 截取全屏/窗口/区域。当用户要求操作 GUI、点击界面元素、自动化桌面操作、截屏查看屏幕内容、移动鼠标、模拟键盘按键时使用。Trigger words: 控制鼠标、点击、点一下、拖拽、模拟按键、输入文字到窗口、截屏、看屏幕、GUI automation, click, move mouse, screenshot, xdotool."
 license: MIT
-compatibility: Linux X11 会话（Wayland 下仅对 XWayland 窗口生效）；需要 xdotool 与 ImageMagick（import/identify）；已在 Deepin 25、3840×2160 实测。
+compatibility: Linux X11 会话（Wayland 下仅对 XWayland 窗口生效）；需要 xdotool 与 ImageMagick 6/7（import/identify 或 magick）；已在 Deepin 25、3840×2160 实测。
 metadata:
   author: ja-plus
-  version: 1.2.0
+  version: 1.3.0
 ---
 
-# X11 Input Control
+# X11 Computer Use
 
 在 Linux X11 桌面上通过 shell 控制鼠标、键盘和截屏。核心脚本是 `<skill>/scripts/xctrl.sh`，封装了 xdotool 与 ImageMagick `import`。
 
@@ -22,7 +22,7 @@ metadata:
 <skill>/scripts/xctrl.sh check
 ```
 
-正常输出包含 `session: x11`、`tool ok : xdotool`、`tool ok : import`、`screen: 3840x2160`。若是 Wayland 会话，注入只对 XWayland 窗口有效，须提前告知用户。
+正常输出包含 `session: x11`、`tool ok : xdotool`、`imagemagick: im6`（或 `im7`）、`screen: 3840x2160`。若是 Wayland 会话，注入与截图都只覆盖 XWayland 窗口，须提前告知用户。
 
 可选：跑一次不产生鼠标动作的自检（会截一张图到临时目录后删除）：
 
