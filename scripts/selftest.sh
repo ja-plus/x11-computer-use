@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# selftest.sh - non-destructive smoke test for xctrl.sh.
+# Sends NO mouse or keyboard events; only screenshots (to a temp dir).
+
+set -u
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+S="$DIR/xctrl.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+pass=0
+fail=0
+ok()  { printf 'ok   %s\n' "$1"; pass=$((pass + 1)); }
+bad() { printf 'FAIL %s\n' "$1"; fail=$((fail + 1)); }
+
+# 1. help
+if "$S" >/dev/null 2>&1; then ok "help exits 0"; else bad "help exits 0"; fi
+
+# 2. unknown command must fail
+if "$S" no-such-command >/dev/null 2>&1; then bad "unknown command exits non-zero"; else ok "unknown command exits non-zero"; fi
+
+# 3. missing argument must fail
+if "$S" click 100 >/dev/null 2>&1; then bad "missing argument exits non-zero"; else ok "missing argument exits non-zero"; fi
+
+# 4. environment check
+if out=$("$S" check 2>&1); then
+    ok "check exits 0"
+    case "$out" in
+        *"tool ok : xdotool"*) ok "xdotool detected" ;;
+        *) bad "xdotool detected" ;;
+    esac
+else
+    bad "check exits 0 (no X11 display or missing tools)"
+    printf '%s\n' "$out" | sed 's/^/     /'
+fi
+
+# 5. pointer position (read-only)
+if "$S" pos 2>/dev/null | grep -q 'window:'; then ok "pos returns X/Y/window"; else bad "pos returns X/Y/window"; fi
+
+# 6. screenshot at native size
+if "$S" shot "$TMP/full.png" >/dev/null 2>&1 && [ -s "$TMP/full.png" ]; then
+    ok "screenshot (native)"
+    if command -v identify >/dev/null 2>&1; then
+        dims=$(identify -format '%wx%h' "$TMP/full.png")
+        ok "native size $dims"
+    fi
+else
+    bad "screenshot (native)"
+fi
+
+# 7. downscaled screenshot + scale output
+if out=$("$S" shot "$TMP/small.png" --max-width 640 2>&1); then
+    w=$(identify -format '%w' "$TMP/small.png" 2>/dev/null || echo 0)
+    if [ "$w" -le 640 ] && [ "$w" -gt 0 ]; then ok "downscale to ${w}px"; else bad "downscale to <=640px (got $w)"; fi
+    case "$out" in
+        *scale:*) ok "scale reported" ;;
+        *) bad "scale reported" ;;
+    esac
+else
+    bad "downscale screenshot"
+    printf '%s\n' "$out" | sed 's/^/     /'
+fi
+
+# 8. coord conversion
+if [ "$("$S" coord 800 450 2.0)" = "1600 900" ]; then ok "coord 800,450 x2 -> 1600,900"; else bad "coord conversion"; fi
+if [ "$("$S" coord 100 80 2.0 960 540)" = "1160 700" ]; then ok "coord with offset"; else bad "coord with offset"; fi
+
+# 9. crosshair mark
+if out=$("$S" shot "$TMP/mark.png" --mark 100,100 2>&1) && printf '%s' "$out" | grep -q 'mark: screen (100,100)'; then
+    ok "mark crosshair"
+else
+    bad "mark crosshair"
+fi
+if "$S" shot "$TMP/badmark.png" --mark 99999,99999 >/dev/null 2>&1; then
+    bad "out-of-bounds mark rejected"
+else
+    ok "out-of-bounds mark rejected"
+fi
+
+printf '\n%d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

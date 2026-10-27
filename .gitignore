@@ -1,0 +1,11 @@
+# Build artifacts / local screenshots
+*.zip
+*.png
+*.jpg
+*.jpeg
+
+# Python (not used by this skill, kept for safety)
+__pycache__/
+*.pyc
+
+.DS_Store
