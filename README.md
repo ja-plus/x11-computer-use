@@ -1,6 +1,6 @@
 # x11-computer-use
 
-一个遵循 [Agent Skills 规范](https://agentskills.io) 的 X11 桌面控制 skill：用 `xdotool` 注入鼠标/键盘事件，用 ImageMagick `import` 截屏。适用于 Claude Code、Codex、Cursor、OpenCode 等支持 `SKILL.md` 的 agent。
+一个遵循 [Agent Skills 规范](https://agentskills.io) 的 X11 桌面控制 skill：用 `xdotool` 注入鼠标/键盘事件，用 ImageMagick `import` 截屏，可选通过 AT-SPI 读取语义控件树。适用于 Claude Code、Codex、Cursor、OpenCode 等支持 `SKILL.md` 的 agent。
 
 > **平台要求：仅适用于 X11 会话。** 不支持 Wayland 原生窗口；在 Wayland 会话中只能操作/截取 XWayland 应用，原生 Wayland 窗口既看不到也点不到。
 >
@@ -8,21 +8,23 @@
 
 ## 特性
 
-- **零编译、零 Python 依赖**：纯 bash 脚本，只依赖 `xdotool` 和 ImageMagick
-- **截图**：全屏 / 指定窗口 / 区域裁剪，支持缩小（`--max-width`）与 JPEG 质量控制
-- **鼠标**：移动、单击、双击、右键、拖拽（会占用用户的真实光标），支持按键编号
-- **键盘**：组合键（`ctrl+c`、`alt+F4`、`super`）与文本输入；中文/emoji 自动走剪贴板并恢复原剪贴板
-- **窗口**：按标题搜索、激活、查询几何
-- **坐标换算**：`coord` 把缩放后的截图坐标换算回屏幕坐标
-- **坐标复核**：`shot --mark x,y` 在截图上画红十字，点击前确认目标
-- **只读自检**：`selftest.sh` 不发任何鼠标/键盘事件
+- **核心零编译、纯 bash**：只依赖 `xdotool` + ImageMagick；可选的 `ui` 语义命令才需要系统 Python + AT-SPI
+- **截图**：全屏 / 指定窗口 / 区域裁剪；`--max-width` 缩小、JPEG 质量控制、`--dual` 一次截屏同时产出 PNG + JPG、`--grid` 坐标网格、`--mark` 十字复核
+- **鼠标**：移动、单击、双击、右键、拖拽、滚轮（会占用用户的真实光标），支持按键编号
+- **键盘 / 剪贴板**：组合键、文本输入（中文/emoji 自动走剪贴板并恢复）、`clipboard get/set`
+- **动作编排**：`act` 宏一次执行多步、`waitfor win/change` 条件等待、`click --verify` 点击像素验证
+- **窗口**：按标题搜索、列出可见窗口、激活、查询几何
+- **坐标工具**：`coord` 换算、`shot --grid` 直接按屏幕坐标读刻度
+- **语义定位（可选）**：`ui tree/find/click` 走 AT-SPI，按控件名定位；Qt/DDE 几何不可信时自动拒绝点击
+- **自检**：`selftest.sh` 26 项，不移动鼠标、不点击、不按键
 
 ## 依赖
 
 - Linux **X11** 会话（Wayland 下仅能操作 XWayland 窗口）
 - [`xdotool`](https://github.com/jordansissel/xdotool)
 - ImageMagick 6 或 7：`import`、`identify`（缩放与 `--mark` 需要 `convert`；IM7 用 `magick`，脚本自动识别）
-- `xclip` 或 `xsel`（可选，中文等非 ASCII 输入用；没有时退回 `xdotool type`）
+- `xclip` 或 `xsel`（剪贴板读写、中文等非 ASCII 输入用；没有时 `type` 退回 `xdotool type`）
+- 可选：`at-spi2-core` + 系统 `/usr/bin/python3` 的 `gi` 绑定（仅 `ui tree/find/click` 需要；缺失时其余命令不受影响）
 
 ## 发行版兼容性
 
@@ -43,7 +45,7 @@
 - **多屏 / 负坐标**：X11 root 坐标支持负值，`--crop`、`coord` 都接受负偏移，但未覆盖所有布局。
 - **包拆分**：个别发行版的 ImageMagick 拆包，缺 `import` 时用 `magick` 或补装对应子包。
 
-使用前先跑一次 `./scripts/xctrl.sh check`，它会报告 `session / xdotool / imagemagick / screen`。
+使用前先跑一次 `./scripts/xctrl.sh check`，它会报告 `session / xdotool / imagemagick / accessibility / screen`。
 
 ## 安装
 
@@ -66,10 +68,14 @@ git clone https://github.com/ja-plus/x11-computer-use ~/.claude/skills/x11-compu
 ```bash
 ./scripts/xctrl.sh check                 # 环境探测
 ./scripts/xctrl.sh shot /tmp/screen.png  # 截屏
+./scripts/xctrl.sh shot /tmp/s.png --dual /tmp/view.jpg  # PNG + 缩小 JPG
+./scripts/xctrl.sh shot /tmp/g.png --grid 200            # 坐标网格
 ./scripts/xctrl.sh click 100 200         # 左键点击
+./scripts/xctrl.sh scroll 960 540 3      # 向下滚 3 格
 ./scripts/xctrl.sh key ctrl+c            # 组合键
 ./scripts/xctrl.sh type "中文输入"        # 非 ASCII 自动用剪贴板
-./scripts/xctrl.sh shot /tmp/check.png --mark 1600,900  # 画十字复核坐标
+./scripts/xctrl.sh act "click 960 540 ; sleep 0.3 ; key Return"  # 多步宏
+./scripts/xctrl.sh ui find "打开"         # AT-SPI 按控件名查找（可选）
 ./scripts/xctrl.sh win search "文件管理"  # 找窗口
 ```
 
@@ -103,6 +109,7 @@ x11-computer-use/
 ├── SKILL.md                  # skill 入口（frontmatter + 指令）
 ├── scripts/
 │   ├── xctrl.sh              # 核心脚本
+│   ├── uidump.py             # AT-SPI 控件树（ui 子命令用）
 │   └── selftest.sh           # 非破坏性自检
 ├── references/
 │   └── troubleshooting.md    # 排障与已知坑
@@ -116,7 +123,7 @@ x11-computer-use/
 ./scripts/selftest.sh
 ```
 
-只做环境检查、截一张测试图并校验尺寸/缩放，**不移动鼠标、不按键**。
+26 项检查：环境、截图/缩放/网格、坐标、`act` 解析、`waitfor` 超时、剪贴板读写、`ui` 降级等；**不移动鼠标、不点击、不按键**。会临时读写剪贴板（结束后还原）。
 
 ## 安全约定
 
@@ -128,7 +135,7 @@ x11-computer-use/
 
 ## 已知限制
 
-- 纯坐标操作，无 GUI 语义（不识别按钮，只认像素）
+- 默认按坐标操作；`ui` 提供 AT-SPI 语义，但需要 `at-spi2-core`，且 Qt/DDE 应用常报 0x0/局部坐标，此时只能当控件清单用，仍要截图定位
 - 仅 X11；Wayland 原生窗口不可控
 - 非 ASCII 输入依赖 `xclip`/`xsel` 和焦点窗口；终端里粘贴键通常是 `ctrl+shift+v`（见 `references/troubleshooting.md`）
 - 4K 屏上截单窗口可能失败，建议 `--crop`

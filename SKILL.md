@@ -1,11 +1,11 @@
 ---
 name: x11-computer-use
-description: "X11 桌面鼠标键盘注入与截屏控制。通过 xdotool 控制指针移动/点击/拖拽/键盘输入，通过 ImageMagick import 截取全屏/窗口/区域。当用户要求操作 GUI、点击界面元素、自动化桌面操作、截屏查看屏幕内容、移动鼠标、模拟键盘按键时使用。Trigger words: 控制鼠标、点击、点一下、拖拽、模拟按键、输入文字到窗口、截屏、看屏幕、GUI automation, click, move mouse, screenshot, xdotool."
+description: "X11 桌面鼠标键盘注入与截屏控制。通过 xdotool 控制指针移动/点击/拖拽/滚轮/键盘输入，通过 ImageMagick import 截取全屏/窗口/区域；支持坐标网格复核（--grid）、点击像素验证（--verify）、双输出截图（--dual）、条件等待（waitfor）、宏序列（act）、剪贴板读写、AT-SPI 语义控件树（ui tree/find/click）。当用户要求操作 GUI、点击界面元素、自动化桌面操作、截屏查看屏幕内容、移动鼠标、滚动页面、模拟键盘按键时使用。Trigger words: 控制鼠标、点击、点一下、拖拽、滚动、滚轮、模拟按键、输入文字到窗口、截屏、看屏幕、GUI automation, click, move mouse, scroll, screenshot, xdotool."
 license: MIT
-compatibility: Linux X11 会话（Wayland 下仅对 XWayland 窗口生效）；需要 xdotool 与 ImageMagick 6/7（import/identify 或 magick）；已在 Deepin 25、3840×2160 实测。
+compatibility: Linux X11 会话（Wayland 下仅对 XWayland 窗口生效）；需要 xdotool 与 ImageMagick 6/7（import/identify 或 magick）；剪贴板读写需 xclip 或 xsel；ui 子命令需 at-spi2-core（缺失时优雅报错）；已在 Deepin 25、3840×2160 实测。
 metadata:
   author: ja-plus
-  version: 1.3.0
+  version: 1.5.0
 ---
 
 # X11 Computer Use
@@ -41,11 +41,11 @@ metadata:
 
 ## 标准工作流
 
-1. 截屏看清屏幕：`<skill>/scripts/xctrl.sh shot /tmp/screen.png`
-2. 用图片查看工具打开截图，定位目标元素坐标
-3. 需要时用 `win search` / `win geom` 交叉验证窗口位置；仍不确定就用 `shot --mark <x>,<y>` 在截图上画十字复核
-4. 执行动作：`<skill>/scripts/xctrl.sh click <x> <y>`
-5. 再次截屏验证结果
+1. 截屏看清屏幕：`<skill>/scripts/xctrl.sh shot /tmp/screen.png --dual /tmp/screen_view.jpg --dual-width 1280`——**一条命令同时产出原生 PNG（点击换算用）和缩小 JPG（看图用）**，输出里的 `view-scale` 用于换算视图坐标
+2. 用图片查看工具打开截图，定位目标元素坐标。**坐标拿不准时重截一张加 `--grid`**：网格标签就是屏幕坐标，按刻度报坐标能显著减小误差
+3. **有 AT-SPI 时优先语义定位**：`ui find "<按钮文字>"` 直接拿到控件中心坐标（需 `sudo apt install at-spi2-core`，见 `ui` 命令），比看图估坐标准
+4. 执行动作，多步操作合并成一条 `act` 宏：`act "click 960 540 ; sleep 0.5 ; type hi ; key Return"`
+5. 验证结果：`click --verify` 自动对比点击点周边像素；等 UI 响应用 `waitfor change <x> <y>` / `waitfor win "<标题>"` 代替盲目 sleep；最后再截屏确认
 
 若第 1 步用了 `--max-width`（缩小截图），**必须先换算坐标**：把截图上量到的坐标乘以输出里的 `scale`，再用 `coord` 命令算一遍，见下节。
 
@@ -84,13 +84,24 @@ $S check                      # 环境探测（X11/工具/分辨率）
 $S pos                        # 当前指针位置
 $S move <x> <y>               # 移动指针（不点击）
 $S click <x> <y> [button]     # 移动+点击；button 1=左 2=中 3=右
+$S click <x> <y> --verify     # 点击并对比点击点周边像素；无变化输出 WARN
 $S dclick <x> <y>             # 双击
 $S rclick <x> <y>             # 右键
 $S drag <x1> <y1> <x2> <y2>   # 拖拽
+$S scroll <x> <y> <clicks>    # 移动+滚轮；正数向下滚，负数向上滚
+$S act "click 960 540 ; sleep 0.5 ; key Return"   # 宏：一条命令跑多步
 $S type "<text>"              # 向焦点窗口输入文本；非 ASCII 自动走剪贴板
 $S type --paste-key ctrl+shift+v "<text>"  # 终端里粘贴键通常是 ctrl+shift+v
 $S key ctrl+c                 # 按键组合（ctrl+c / Return / alt+F4 / super）
+$S clipboard get              # 读剪贴板文本（精确拿取 GUI 里的文本内容）
+$S clipboard set "<text>"     # 写剪贴板；省略参数时从 stdin 读
+$S waitfor win "<标题>"        # 阻塞等待匹配窗口出现（默认 10s 超时）
+$S waitfor change <x> <y>     # 阻塞等待 (x,y) 附近像素变化（等 UI 响应）
+$S ui tree                    # AT-SPI 语义控件树（角色/名称/坐标）
+$S ui find "<按钮文字>"        # 按名称找控件，输出 center=(x,y)
+$S ui click "<按钮文字>"       # 语义点击第一个匹配控件的中心
 $S win search "<标题关键词>"    # 列出匹配窗口：id | 几何 | 标题
+$S win list                   # 列出所有可见窗口（最上层在前）
 $S win activate <id|标题>      # 激活（聚焦+置顶）窗口
 $S win geom <id|标题>          # 查询窗口几何
 $S shot /tmp/out.png          # 全屏截图（原生分辨率）
@@ -98,6 +109,8 @@ $S shot /tmp/out.png --win <id|标题>          # 截单个窗口
 $S shot /tmp/out.png --crop 800x600+100+100   # 截区域
 $S shot /tmp/out.png --delay 2                # 延迟 2 秒再截（等动画/弹窗）
 $S shot /tmp/out.png --max-width 1920         # 缩小截图（记得换算坐标）
+$S shot /tmp/out.png --dual /tmp/v.jpg        # 一次截屏额外产缩小 JPG（省一半时间）
+$S shot /tmp/out.png --grid 200               # 叠加坐标网格（标签=屏幕坐标）
 $S shot /tmp/out.jpg --quality 80             # JPEG + 质量
 $S shot /tmp/out.png --mark 1600,900           # 画十字复核目标坐标
 $S coord <img_x> <img_y> <scale> [off_x off_y] # 图片坐标 -> 屏幕坐标
@@ -111,7 +124,14 @@ $S coord <img_x> <img_y> <scale> [off_x off_y] # 图片坐标 -> 屏幕坐标
 - **键名**：xdotool 用 X keysym 名（Return、Escape、Tab、space、super 等），不是 "enter"。
 - **输入延迟**：脚本已内置 move→click 同步与 0.2–0.3s 间歇；对慢响应的窗口，动作后额外 `sleep` 再截屏。
 - **非 ASCII 文本**：`type` 检测到中文/emoji 会自动改用剪贴板并恢复原剪贴板；终端里粘贴键通常是 `ctrl+shift+v`，用 `--paste-key` 指定。
-- **盲点复核**：不确定坐标时先 `shot --mark <x>,<y>`，截图上的红十字就是即将点击的位置。
+- **盲点复核**：不确定坐标时先 `shot --mark <x>,<y>`，截图上的红十字就是即将点击的位置；或用 `--grid` 直接按刻度读坐标。
+- **`--verify` 的 WARN 不一定是点空**：只改变焦点/悬停态的点击不会产生像素变化；看到 WARN 先重新截屏确认，不要盲目重试。
+- **`clipboard get` 只返回文本**：剪贴板里是图片/文件时读不到内容。
+- **网格标签即屏幕坐标**：`--grid` 画在截图上的数字已经是屏幕坐标系（含 crop 偏移换算），照着报坐标即可，不需要再乘 scale。
+- **`act` 宏不做 shell 引号解析**：步骤按空白切分，`type` 的文本不能带空格或引号（引号会被原样输入）；含空格/分号的文本请单独调用 `type`。
+- **`ui` 语义树需要 at-spi2-core**：未安装时报错并提示；`check` 会报告 `accessibility: ok/off`。GTK 应用可能还需 `GTK_MODULES=gail:atk-bridge`、Qt 应用需 `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` 并重启应用才暴露控件树。
+- **DDE/Qt 应用的几何不可信（实测）**：Qt bridge 能给出控件名（`ui find` 有用），但窗口 frame 报 0x0、菜单项坐标是弹层局部值——`uidump` 会把这类元素标为 `center=none`，`ui click` 拒绝执行并提示回退。工作流：`ui find` 拿控件清单 → `shot --grid` 视觉定位 → 坐标点击。GTK/Electron 应用几何通常可信，`ui click` 可直接用。
+- **`--dual` 的 `view-scale`**：view 图上的坐标 × view-scale（crop 时再加偏移）= 屏幕坐标，与主图 `scale` 的换算方式相同。
 
 更多排障细节见 `references/troubleshooting.md`。
 
